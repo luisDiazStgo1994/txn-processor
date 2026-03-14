@@ -18,6 +18,7 @@ import (
 
 // MonthData holds the per-month aggregates rendered in the email template.
 type MonthData struct {
+	MonthNum  int // 1-12, used for chronological sorting
 	Month     string
 	TxnCount  int
 	AvgCredit float64

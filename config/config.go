@@ -29,11 +29,12 @@ type SMTPConfig struct {
 }
 
 type AppConfig struct {
-	DB               DBConfig
-	SMTP             SMTPConfig
-	RecipientEmail   string
-	TransactionsFile string
-	AccountID        string
+	DB                  DBConfig
+	SMTP                SMTPConfig
+	RecipientEmail      string
+	TransactionsFile    string
+	AccountID           string
+	PipelineTimeoutSecs int
 }
 
 func Load() (AppConfig, error) {
@@ -58,15 +59,38 @@ func Load() (AppConfig, error) {
 		SMTP: SMTPConfig{
 			Host:     getEnv("SMTP_HOST", "smtp.gmail.com"),
 			Port:     smtpPort,
-			User:     mustEnv("SMTP_USER"),
-			Password: mustEnv("SMTP_PASSWORD"),
+			User:     os.Getenv("SMTP_USER"),
+			Password: os.Getenv("SMTP_PASSWORD"),
 		},
-		RecipientEmail:   mustEnv("RECIPIENT_EMAIL"),
+		RecipientEmail:   os.Getenv("RECIPIENT_EMAIL"),
 		TransactionsFile: getEnv("TRANSACTIONS_FILE", "/data/txns.csv"),
-		AccountID:        getEnv("ACCOUNT_ID", "ACC-001"),
+		AccountID:           getEnv("ACCOUNT_ID", "ACC-001"),
+		PipelineTimeoutSecs: func() int {
+			v, _ := strconv.Atoi(getEnv("PIPELINE_TIMEOUT_SECS", "120"))
+			return v
+		}(),
+	}
+
+	if err := cfg.validate(); err != nil {
+		return AppConfig{}, err
 	}
 
 	return cfg, nil
+}
+
+// validate checks that all required fields are non-empty after loading.
+func (c AppConfig) validate() error {
+	required := map[string]string{
+		"SMTP_USER":       c.SMTP.User,
+		"SMTP_PASSWORD":   c.SMTP.Password,
+		"RECIPIENT_EMAIL": c.RecipientEmail,
+	}
+	for key, val := range required {
+		if val == "" {
+			return fmt.Errorf("config: required env var %q is not set", key)
+		}
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {
@@ -74,12 +98,4 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic(fmt.Sprintf("config: required env var %q is not set", key))
-	}
-	return v
 }

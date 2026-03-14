@@ -34,6 +34,7 @@ type Transaction struct {
 // MonthSummary holds aggregated data for a single calendar month.
 type MonthSummary struct {
 	Month        string
+	MonthNum     int // 1-12, used for chronological sorting
 	TxnCount     int
 	AvgCredit    float64
 	AvgDebit     float64
@@ -198,6 +199,7 @@ func (s *Summary) apply(txn Transaction) {
 	key := txn.Date.Format("January")
 	ms := s.ByMonth[key]
 	ms.Month = key
+	ms.MonthNum = int(txn.Date.Month())
 	ms.TxnCount++
 
 	if txn.Amount > 0 {
