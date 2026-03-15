@@ -48,7 +48,7 @@ func run() error {
 
 	p := parser.NewCsvParser(f)
 
-	orch := orchestrator.New(repo, sender)
+	orch := orchestrator.New(repo, sender, cfg.CheckpointInterval)
 	if err := orch.Run(ctx, p, cfg.TransactionsFile, cfg.AccountID, cfg.RecipientEmail); err != nil {
 		return fmt.Errorf("run: %w", err)
 	}

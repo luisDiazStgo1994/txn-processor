@@ -35,6 +35,7 @@ type AppConfig struct {
 	TransactionsFile    string
 	AccountID           string
 	PipelineTimeoutSecs int
+	CheckpointInterval  int // CHECKPOINT_INTERVAL rows between mid-file DB flushes
 }
 
 func Load() (AppConfig, error) {
@@ -69,6 +70,10 @@ func Load() (AppConfig, error) {
 			v, _ := strconv.Atoi(getEnv("PIPELINE_TIMEOUT_SECS", "120"))
 			return v
 		}(),
+		CheckpointInterval: func() int {
+			v, _ := strconv.Atoi(getEnv("CHECKPOINT_INTERVAL", "100"))
+			return v
+		}(),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -89,6 +94,9 @@ func (c AppConfig) validate() error {
 		if val == "" {
 			return fmt.Errorf("config: required env var %q is not set", key)
 		}
+	}
+	if c.CheckpointInterval <= 0 {
+		return fmt.Errorf("config: CHECKPOINT_INTERVAL must be > 0, got %d", c.CheckpointInterval)
 	}
 	return nil
 }

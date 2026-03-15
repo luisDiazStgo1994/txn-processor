@@ -52,21 +52,24 @@ type Summary struct {
 // Aggregator reads a CSV file through a Parser, computes the Summary,
 // and tracks processing state in the Repository.
 type Aggregator struct {
-	parser    parser.Parser
-	repo      storage.Repository
-	accountID string
-	fileKey   string // idempotency key for this file
+	parser             parser.Parser
+	repo               storage.Repository
+	accountID          string
+	fileKey            string // idempotency key for this file
+	checkpointInterval int    // rows between mid-file checkpoint flushes
 }
 
 // New creates a ready-to-use Aggregator.
 // accountID identifies whose transactions are being processed.
 // fileKey is the idempotency key for this file run (e.g. SHA256 or S3 ETag).
-func New(p parser.Parser, repo storage.Repository, accountID, fileKey string) *Aggregator {
+// checkpointInterval controls how often the checkpoint row is flushed to the DB.
+func New(p parser.Parser, repo storage.Repository, accountID, fileKey string, checkpointInterval int) *Aggregator {
 	return &Aggregator{
-		parser:    p,
-		repo:      repo,
-		accountID: accountID,
-		fileKey:   fileKey,
+		parser:             p,
+		repo:               repo,
+		accountID:          accountID,
+		fileKey:            fileKey,
+		checkpointInterval: checkpointInterval,
 	}
 }
 
@@ -100,7 +103,7 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 		}
 	}
 
-	summary, err := a.processRows(ctx, fp.CheckpointRow)
+	summary, err := a.processRows(ctx, fp)
 	if err != nil {
 		fp.Status = storage.FileStatusFailed
 		_ = a.repo.UpdateFileProcessing(ctx, fp)
@@ -117,13 +120,15 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 }
 
 // processRows streams rows from the parser and builds the Summary.
-// skipRows is the number of data rows to skip (used when resuming from a checkpoint).
-func (a *Aggregator) processRows(ctx context.Context, skipRows int) (Summary, error) {
+// fp is passed by value so we can mutate CheckpointRow locally and flush it
+// periodically without affecting the caller's copy until Compute() finalises.
+func (a *Aggregator) processRows(ctx context.Context, fp storage.FileProcessing) (Summary, error) {
 	summary := Summary{
 		AccountID: a.accountID,
 		ByMonth:   make(map[string]MonthSummary),
 	}
 
+	skipRows := fp.CheckpointRow
 	var rowNum int
 	for {
 		select {
@@ -155,6 +160,13 @@ func (a *Aggregator) processRows(ctx context.Context, skipRows int) (Summary, er
 		}
 
 		summary.apply(txn)
+
+		// Flush a mid-file checkpoint so a crash loses at most checkpointInterval rows.
+		if rowNum%a.checkpointInterval == 0 {
+			fp.CheckpointRow = rowNum
+			fp.HeartbeatAt = time.Now().UTC()
+			_ = a.repo.UpdateFileProcessing(ctx, fp) // best-effort; don't abort on flush error
+		}
 	}
 
 	return summary, nil

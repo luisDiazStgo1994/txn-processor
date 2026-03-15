@@ -22,13 +22,14 @@ import (
 
 // Orchestrator wires the sender and repository together and drives the pipeline.
 type Orchestrator struct {
-	sender email.Sender
-	repo   storage.Repository
+	sender             email.Sender
+	repo               storage.Repository
+	checkpointInterval int
 }
 
 // New creates a ready-to-use Orchestrator.
-func New(repo storage.Repository, sender email.Sender) *Orchestrator {
-	return &Orchestrator{repo: repo, sender: sender}
+func New(repo storage.Repository, sender email.Sender, checkpointInterval int) *Orchestrator {
+	return &Orchestrator{repo: repo, sender: sender, checkpointInterval: checkpointInterval}
 }
 
 // Run executes the full pipeline for a single file:
@@ -50,7 +51,7 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, filePath, accou
 
 	fileKey := idempotencyKey(filePath)
 
-	agg := aggregator.New(p, o.repo, accountID, fileKey)
+	agg := aggregator.New(p, o.repo, accountID, fileKey, o.checkpointInterval)
 
 	summary, err := agg.Compute(ctx)
 	if err != nil {
