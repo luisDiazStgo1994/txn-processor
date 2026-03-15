@@ -1,6 +1,6 @@
 // Package orchestrator coordinates the full processing pipeline:
 //  1. Derive idempotency key and ensure the account exists
-//  2. Run the aggregator to compute the summary (stream via io.Reader)
+//  2. Run the aggregator to compute the summary
 //  3. Persist the summary as JSONB
 //  4. Send the summary email
 //  5. Mark email_sent = true
@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"time"
 
@@ -23,13 +22,14 @@ import (
 
 // Orchestrator wires the sender and repository together and drives the pipeline.
 type Orchestrator struct {
-	sender email.Sender
-	repo   storage.Repository
+	sender             email.Sender
+	repo               storage.Repository
+	checkpointInterval int
 }
 
 // New creates a ready-to-use Orchestrator.
-func New(repo storage.Repository, sender email.Sender) *Orchestrator {
-	return &Orchestrator{repo: repo, sender: sender}
+func New(repo storage.Repository, sender email.Sender, checkpointInterval int) *Orchestrator {
+	return &Orchestrator{repo: repo, sender: sender, checkpointInterval: checkpointInterval}
 }
 
 // Run executes the full pipeline for a single file:
@@ -41,7 +41,7 @@ func New(repo storage.Repository, sender email.Sender) *Orchestrator {
 //
 // src is an io.Reader so callers can pass a local file, an S3 stream, or any
 // other source — the orchestrator stays agnostic to the origin.
-func (o *Orchestrator) Run(ctx context.Context, src io.Reader, filePath, accountID, recipientEmail string) error {
+func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, filePath, accountID, recipientEmail string) error {
 	if err := o.repo.UpsertAccount(ctx, storage.Account{
 		AccountID: accountID,
 		Email:     recipientEmail,
@@ -51,8 +51,7 @@ func (o *Orchestrator) Run(ctx context.Context, src io.Reader, filePath, account
 
 	fileKey := idempotencyKey(filePath)
 
-	p := parser.NewCsvParser(src)
-	agg := aggregator.New(p, o.repo, accountID, fileKey)
+	agg := aggregator.New(p, o.repo, accountID, fileKey, o.checkpointInterval)
 
 	summary, err := agg.Compute(ctx)
 	if err != nil {
@@ -124,6 +123,7 @@ func toEmailData(s aggregator.Summary, recipientEmail string) email.EmailData {
 	months := make([]email.MonthData, 0, len(s.ByMonth))
 	for _, ms := range s.ByMonth {
 		months = append(months, email.MonthData{
+			MonthNum:  ms.MonthNum,
 			Month:     ms.Month,
 			TxnCount:  ms.TxnCount,
 			AvgCredit: ms.AvgCredit,
@@ -131,7 +131,7 @@ func toEmailData(s aggregator.Summary, recipientEmail string) email.EmailData {
 		})
 	}
 	sort.Slice(months, func(i, j int) bool {
-		return months[i].Month < months[j].Month
+		return months[i].MonthNum < months[j].MonthNum
 	})
 	return email.EmailData{
 		AccountID:    s.AccountID,

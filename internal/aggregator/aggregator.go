@@ -32,13 +32,21 @@ type Transaction struct {
 }
 
 // MonthSummary holds aggregated data for a single calendar month.
+// All fields are exported so the struct marshals/unmarshals correctly.
 type MonthSummary struct {
-	Month        string
-	TxnCount     int
-	AvgCredit    float64
-	AvgDebit     float64
-	creditCount  int // unexported; used for incremental average
-	debitCount   int // unexported; used for incremental average
+	Month     string
+	MonthNum  int // 1-12, used for chronological sorting
+	TxnCount  int
+	AvgCredit float64
+	AvgDebit  float64
+}
+
+// monthAcc extends MonthSummary with transient counters needed for
+// Welford's running average. It is local to processRows and never serialised.
+type monthAcc struct {
+	MonthSummary
+	creditCount int
+	debitCount  int
 }
 
 // Summary is the result produced by Compute for a single account+file pair.
@@ -51,21 +59,24 @@ type Summary struct {
 // Aggregator reads a CSV file through a Parser, computes the Summary,
 // and tracks processing state in the Repository.
 type Aggregator struct {
-	parser    parser.Parser
-	repo      storage.Repository
-	accountID string
-	fileKey   string // idempotency key for this file
+	parser             parser.Parser
+	repo               storage.Repository
+	accountID          string
+	fileKey            string // idempotency key for this file
+	checkpointInterval int    // rows between mid-file checkpoint flushes
 }
 
 // New creates a ready-to-use Aggregator.
 // accountID identifies whose transactions are being processed.
 // fileKey is the idempotency key for this file run (e.g. SHA256 or S3 ETag).
-func New(p parser.Parser, repo storage.Repository, accountID, fileKey string) *Aggregator {
+// checkpointInterval controls how often the checkpoint row is flushed to the DB.
+func New(p parser.Parser, repo storage.Repository, accountID, fileKey string, checkpointInterval int) *Aggregator {
 	return &Aggregator{
-		parser:    p,
-		repo:      repo,
-		accountID: accountID,
-		fileKey:   fileKey,
+		parser:             p,
+		repo:               repo,
+		accountID:          accountID,
+		fileKey:            fileKey,
+		checkpointInterval: checkpointInterval,
 	}
 }
 
@@ -99,7 +110,7 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 		}
 	}
 
-	summary, err := a.processRows(ctx, fp.CheckpointRow)
+	summary, err := a.processRows(ctx, fp)
 	if err != nil {
 		fp.Status = storage.FileStatusFailed
 		_ = a.repo.UpdateFileProcessing(ctx, fp)
@@ -116,13 +127,16 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 }
 
 // processRows streams rows from the parser and builds the Summary.
-// skipRows is the number of data rows to skip (used when resuming from a checkpoint).
-func (a *Aggregator) processRows(ctx context.Context, skipRows int) (Summary, error) {
+// fp is passed by value so we can mutate CheckpointRow locally and flush it
+// periodically without affecting the caller's copy until Compute() finalises.
+func (a *Aggregator) processRows(ctx context.Context, fp storage.FileProcessing) (Summary, error) {
 	summary := Summary{
 		AccountID: a.accountID,
 		ByMonth:   make(map[string]MonthSummary),
 	}
+	accs := make(map[string]monthAcc)
 
+	skipRows := fp.CheckpointRow
 	var rowNum int
 	for {
 		select {
@@ -153,7 +167,22 @@ func (a *Aggregator) processRows(ctx context.Context, skipRows int) (Summary, er
 			continue
 		}
 
-		summary.apply(txn)
+		summary.TotalBalance += txn.Amount
+		key := txn.Date.Format("January")
+		acc := accs[key]
+		acc.apply(txn)
+		accs[key] = acc
+
+		// Flush a mid-file checkpoint so a crash loses at most checkpointInterval rows.
+		if rowNum%a.checkpointInterval == 0 {
+			fp.CheckpointRow = rowNum
+			fp.HeartbeatAt = time.Now().UTC()
+			_ = a.repo.UpdateFileProcessing(ctx, fp) // best-effort; don't abort on flush error
+		}
+	}
+
+	for k, acc := range accs {
+		summary.ByMonth[k] = acc.MonthSummary
 	}
 
 	return summary, nil
@@ -190,26 +219,21 @@ func parseDate(raw string) (time.Time, error) {
 	return time.Date(time.Now().Year(), time.Month(month), day, 0, 0, 0, 0, time.UTC), nil
 }
 
-// apply updates the Summary with a single transaction using an incremental
+// apply updates the accumulator with a single transaction using Welford's
 // running average so we never need to store all amounts in memory.
-func (s *Summary) apply(txn Transaction) {
-	s.TotalBalance += txn.Amount
-
-	key := txn.Date.Format("January")
-	ms := s.ByMonth[key]
-	ms.Month = key
-	ms.TxnCount++
+func (a *monthAcc) apply(txn Transaction) {
+	a.Month = txn.Date.Format("January")
+	a.MonthNum = int(txn.Date.Month())
+	a.TxnCount++
 
 	if txn.Amount > 0 {
-		ms.creditCount++
+		a.creditCount++
 		// Welford-style running average: avgnew = avgold + (x - avgold) / n
-		ms.AvgCredit += (txn.Amount - ms.AvgCredit) / float64(ms.creditCount)
+		a.AvgCredit += (txn.Amount - a.AvgCredit) / float64(a.creditCount)
 	} else {
-		ms.debitCount++
-		ms.AvgDebit += (txn.Amount - ms.AvgDebit) / float64(ms.debitCount)
+		a.debitCount++
+		a.AvgDebit += (txn.Amount - a.AvgDebit) / float64(a.debitCount)
 	}
-
-	s.ByMonth[key] = ms
 }
 
 // txnCount returns the total number of transactions across all months.
