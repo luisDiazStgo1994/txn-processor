@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/luisDiazStgo1994/txn-processor/config"
@@ -16,7 +18,8 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatalf("txn-processor: %v", err)
+		slog.Error("txn-processor failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -26,14 +29,23 @@ func run() error {
 		return fmt.Errorf("config: %w", err)
 	}
 
+	// ctx is cancelled on SIGINT/SIGTERM or when the pipeline timeout expires.
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	timeout := time.Duration(cfg.PipelineTimeoutSecs) * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(sigCtx, timeout)
 	defer cancel()
 
 	repo, err := storage.NewPostgresRepository(cfg.DB.DSN())
 	if err != nil {
 		return fmt.Errorf("storage: %w", err)
 	}
+	defer func() {
+		if err := repo.Close(); err != nil {
+			slog.Warn("closing db connection pool", "error", err)
+		}
+	}()
 
 	sender, err := email.NewEmailSender(cfg.SMTP, "templates/email.html")
 	if err != nil {
@@ -53,6 +65,6 @@ func run() error {
 		return fmt.Errorf("run: %w", err)
 	}
 
-	log.Printf("pipeline complete for account %s", cfg.AccountID)
+	slog.Info("pipeline complete", "account_id", cfg.AccountID)
 	return nil
 }

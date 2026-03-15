@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -161,9 +162,8 @@ func (a *Aggregator) processRows(ctx context.Context, fp storage.FileProcessing)
 
 		txn, err := parseRow(row, a.accountID)
 		if err != nil {
-			// Malformed rows are skipped with a note; they don't abort the run.
-			// TODO: emit a structured log here when observability is added.
-			_ = fmt.Sprintf("aggregator: skipping malformed row %d: %v", rowNum, err)
+			// Malformed rows are skipped; they don't abort the run.
+			slog.Warn("skipping malformed row", "row", rowNum, "error", err)
 			continue
 		}
 
