@@ -26,6 +26,12 @@ func NewPostgresRepository(dsn string) (*PostgresRepository, error) {
 	return &PostgresRepository{db: db}, nil
 }
 
+// Close releases the underlying connection pool.
+// It should be called via defer after NewPostgresRepository succeeds.
+func (r *PostgresRepository) Close() error {
+	return r.db.Close()
+}
+
 // --- Account ---
 
 func (r *PostgresRepository) UpsertAccount(ctx context.Context, account Account) error {
