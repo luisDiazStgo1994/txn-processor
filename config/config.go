@@ -104,6 +104,15 @@ func (c AppConfig) validate() error {
 	if c.CheckpointInterval <= 0 {
 		return fmt.Errorf("config: CHECKPOINT_INTERVAL must be > 0, got %d", c.CheckpointInterval)
 	}
+	if c.HeartbeatTimeoutSecs <= 0 {
+		return fmt.Errorf("config: HEARTBEAT_TIMEOUT_SECS must be > 0, got %d", c.HeartbeatTimeoutSecs)
+	}
+	if c.PipelineTimeoutSecs <= 0 {
+		return fmt.Errorf("config: PIPELINE_TIMEOUT_SECS must be > 0, got %d", c.PipelineTimeoutSecs)
+	}
+	if c.MaxRowErrors < 0 {
+		return fmt.Errorf("config: MAX_ROW_ERRORS must be >= 0, got %d", c.MaxRowErrors)
+	}
 	return nil
 }
 
