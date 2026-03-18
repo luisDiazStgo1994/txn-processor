@@ -1,7 +1,7 @@
 // Package email handles HTML template rendering and SMTP delivery.
 // It owns its own data types (EmailData) so it has no dependency on
 // the aggregator package — the orchestrator bridges the two.
-package email
+package sender
 
 import (
 	"bytes"
@@ -16,8 +16,9 @@ import (
 
 // --- Data types owned by this package ---
 
-// MonthData holds the per-month aggregates rendered in the email template.
-type MonthData struct {
+// MonthDataDTO holds the per-month aggregates rendered in the email template.
+type MonthDataDTO struct {
+	Year      int
 	MonthNum  int // 1-12, used for chronological sorting
 	Month     string
 	TxnCount  int
@@ -25,20 +26,18 @@ type MonthData struct {
 	AvgDebit  float64
 }
 
-// EmailData is the payload passed to Send.
-// It is populated by the orchestrator from the aggregator's Summary.
-type EmailData struct {
-	AccountID    string
-	RecipientTo  string
+// SenderData is the pure content payload passed to Send.
+// Routing information (recipient address) is passed separately to Send.
+type SenderData struct {
 	TotalBalance float64
-	ByMonth      []MonthData // ordered slice, easier to range in templates
+	ByYear       []MonthDataDTO // ordered slice, easier to range in templates
 }
 
 // --- Interface ---
 
 // Sender is the email delivery contract.
 type Sender interface {
-	Send(ctx context.Context, data EmailData) error
+	Send(ctx context.Context, to string, data SenderData) error
 }
 
 // --- Implementation ---
@@ -48,8 +47,9 @@ type Config = config.SMTPConfig
 
 // EmailSender renders an HTML template and delivers it via SMTP.
 type EmailSender struct {
-	cfg  Config
-	tmpl *template.Template
+	cfg         Config
+	tmpl        *template.Template
+	RecipientTo string
 }
 
 // NewEmailSender constructs an EmailSender by loading the HTML template at tmplPath.
@@ -66,23 +66,23 @@ func NewEmailSender(cfg Config, tmplPath string) (*EmailSender, error) {
 
 // Send renders the HTML template with data and delivers it via SMTP.
 // ctx is accepted for interface consistency; SMTP calls are not yet context-aware.
-func (s *EmailSender) Send(_ context.Context, data EmailData) error {
+func (s *EmailSender) Send(_ context.Context, to string, data SenderData) error {
 	body, err := s.render(data)
 	if err != nil {
 		return err
 	}
 
-	msg := buildMessage(s.cfg.User, data.RecipientTo, "Your Stori Transaction Summary", body)
+	msg := buildMessage(s.cfg.User, to, "Your Stori Transaction Summary", body)
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 	auth := smtp.PlainAuth("", s.cfg.User, s.cfg.Password, s.cfg.Host)
 
-	if err := smtp.SendMail(addr, auth, s.cfg.User, []string{data.RecipientTo}, msg); err != nil {
-		return fmt.Errorf("email: send mail to %q: %w", data.RecipientTo, err)
+	if err := smtp.SendMail(addr, auth, s.cfg.User, []string{to}, msg); err != nil {
+		return fmt.Errorf("email: send mail to %q: %w", to, err)
 	}
 	return nil
 }
 
-func (s *EmailSender) render(data EmailData) (string, error) {
+func (s *EmailSender) render(data SenderData) (string, error) {
 	var buf bytes.Buffer
 	if err := s.tmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("email: render template: %w", err)
