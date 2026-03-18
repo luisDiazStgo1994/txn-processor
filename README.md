@@ -43,7 +43,7 @@ cd txn-processor
 
 ### 2. Create your `.env` file
 
-Copy the example below and fill in your values:
+Copy the example below and fill in your values (MUST edit RECIPIENT_EMAIL and BREVO_API_KEY):
 
 ```bash
 # .env
@@ -107,6 +107,8 @@ This will:
 You should receive an HTML email with the transaction summary at the address you set in `RECIPIENT_EMAIL`.
 
 ## Running Tests
+
+Requires **Go 1.22+** installed locally.
 
 ```bash
 go test ./...
