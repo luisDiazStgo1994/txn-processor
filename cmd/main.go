@@ -47,7 +47,7 @@ func run() error {
 		}
 	}()
 
-	sender, err := sender.NewEmailSender(cfg.SMTP, cfg.EmailTemplatePath)
+	sender, err := sender.NewBrevoSender(cfg.Brevo.APIKey, cfg.Brevo.SenderEmail, cfg.Brevo.SenderName, cfg.EmailTemplatePath)
 	if err != nil {
 		return fmt.Errorf("email: %w", err)
 	}

@@ -1,6 +1,3 @@
-// Package email handles HTML template rendering and SMTP delivery.
-// It owns its own data types (EmailData) so it has no dependency on
-// the aggregator package — the orchestrator bridges the two.
 package sender
 
 import (
@@ -10,50 +7,24 @@ import (
 	"html/template"
 	"math"
 	"net/smtp"
-
-	"github.com/luisDiazStgo1994/txn-processor/config"
 )
 
-// --- Data types owned by this package ---
-
-// MonthDataDTO holds the per-month aggregates rendered in the email template.
-type MonthDataDTO struct {
-	Year      int
-	MonthNum  int // 1-12, used for chronological sorting
-	Month     string
-	TxnCount  int
-	AvgCredit float64
-	AvgDebit  float64
+// SMTPConfig groups the credentials needed by EmailSender.
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
 }
-
-// SenderData is the pure content payload passed to Send.
-// Routing information (recipient address) is passed separately to Send.
-type SenderData struct {
-	TotalBalance float64
-	ByYear       []MonthDataDTO // ordered slice, easier to range in templates
-}
-
-// --- Interface ---
-
-// Sender is the email delivery contract.
-type Sender interface {
-	Send(ctx context.Context, to string, data SenderData) error
-}
-
-// --- Implementation ---
-
-// Config groups the SMTP credentials needed by EmailSender.
-type Config = config.SMTPConfig
 
 // EmailSender renders an HTML template and delivers it via SMTP.
 type EmailSender struct {
-	cfg         Config
-	tmpl        *template.Template
-	RecipientTo string
+	cfg  SMTPConfig
+	tmpl *template.Template
 }
 
 // NewEmailSender constructs an EmailSender by loading the HTML template at tmplPath.
-func NewEmailSender(cfg Config, tmplPath string) (*EmailSender, error) {
+func NewEmailSender(cfg SMTPConfig, tmplPath string) (*EmailSender, error) {
 	funcMap := template.FuncMap{
 		"absFloat": func(f float64) float64 { return math.Abs(f) },
 	}
@@ -65,7 +36,6 @@ func NewEmailSender(cfg Config, tmplPath string) (*EmailSender, error) {
 }
 
 // Send renders the HTML template with data and delivers it via SMTP.
-// ctx is accepted for interface consistency; SMTP calls are not yet context-aware.
 func (s *EmailSender) Send(_ context.Context, to string, data SenderData) error {
 	body, err := s.render(data)
 	if err != nil {

@@ -5,53 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Stori — Transaction Summary</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; -webkit-text-size-adjust: 100%; }
     .wrapper { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
     .header { background: #00b140; padding: 24px 32px; text-align: center; }
-    .header img { height: 40px; }
-    .header h1 { color: #ffffff; margin: 12px 0 0; font-size: 20px; }
-    .body { padding: 32px; }
+    .header img { width: 20%; max-width: 120px; display: inline-block; border-radius: 20%; }
+    .content { padding: 32px; }
     .balance { text-align: center; margin-bottom: 32px; }
-    .balance .label { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
-    .balance .amount { font-size: 40px; font-weight: bold; color: #00b140; margin-top: 8px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-    th { background: #f0f0f0; text-align: left; padding: 10px 12px; font-size: 13px; color: #555; }
-    td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 14px; color: #333; }
+    .balance .label { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 1.5px; }
+    .balance .amount { font-size: 38px; font-weight: bold; color: #00b140; margin-top: 8px; }
+    .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; min-width: 400px; }
+    th { background: #f0f0f0; text-align: left; padding: 10px 12px; font-size: 13px; color: #555; white-space: nowrap; }
+    td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 14px; color: #333; white-space: nowrap; }
     tr:last-child td { border-bottom: none; }
+    .credit { color: #00b140; }
+    .debit { color: #e04040; }
+    .notes { margin-top: 24px; padding: 16px; background: #fff8e1; border-left: 4px solid #ffb300; border-radius: 4px; font-size: 14px; color: #6d4c00; }
+    .notes strong { color: #e65100; }
     .footer { background: #f9f9f9; text-align: center; padding: 16px; font-size: 12px; color: #aaa; border-top: 1px solid #eee; }
+
+    @media only screen and (max-width: 480px) {
+      .wrapper { margin: 0; border-radius: 0; }
+      .content { padding: 20px 16px; }
+      .header { padding: 20px 16px; }
+      .balance .amount { font-size: 30px; }
+      th, td { padding: 8px 8px; font-size: 13px; }
+    }
   </style>
 </head>
 <body>
   <div class="wrapper">
     <div class="header">
+      <img src="https://images.seeklogo.com/logo-png/50/1/stori-logo-png_seeklogo-508253.png" alt="Stori" />
       <h1>Transaction Summary</h1>
     </div>
-    <div class="body">
+    <div class="content">
       <div class="balance">
         <div class="label">Total Balance</div>
         <div class="amount">${{printf "%.2f" .TotalBalance}}</div>
       </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Month</th>
-            <th>Transactions</th>
-            <th>Avg Credit</th>
-            <th>Avg Debit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .ByYear}}
-          <tr>
-            <td>{{.Month}}</td>
-            <td>{{.TxnCount}}</td>
-            <td>+${{printf "%.2f" .AvgCredit}}</td>
-            <td>-${{printf "%.2f" (absFloat .AvgDebit)}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Transactions</th>
+              <th>Avg Credit</th>
+              <th>Avg Debit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .ByYear}}
+            <tr>
+              <td>{{.Month}} {{.Year}}</td>
+              <td>{{.TxnCount}}</td>
+              <td class="credit">+${{printf "%.2f" .AvgCredit}}</td>
+              <td class="debit">-${{printf "%.2f" (absFloat .AvgDebit)}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+
+      {{if gt .InvalidRows 0}}
+      <div class="notes">
+        <strong>Note:</strong> {{.InvalidRows}} transaction(s) in the file could not be processed due to invalid or malformed data. These transactions were excluded from the summary above. Ask for clarification in our chat online in wwww.stori.mx/chat
+      </div>
+      {{end}}
     </div>
     <div class="footer">
       This is an automated message from Stori. Please do not reply.

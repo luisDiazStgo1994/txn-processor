@@ -21,35 +21,29 @@ func (c DBConfig) DSN() string {
 	)
 }
 
-type SMTPConfig struct {
-	Host     string
-	Port     int
-	User     string
-	Password string
+type BrevoConfig struct {
+	APIKey      string
+	SenderEmail string
+	SenderName  string
 }
 
 type AppConfig struct {
-	DB                  DBConfig
-	SMTP                SMTPConfig
-	EmailTemplatePath   string
-	RecipientEmail      string
-	TransactionsFile    string
-	AccountID           string
-	PipelineTimeoutSecs    int
-	CheckpointInterval     int // CHECKPOINT_INTERVAL rows between mid-file DB flushes
-	HeartbeatTimeoutSecs   int // HEARTBEAT_TIMEOUT_SECS before a stale lock is reclaimed
-	MaxRowErrors           int // MAX_ROW_ERRORS threshold before marking file as to_review
+	DB                   DBConfig
+	Brevo                BrevoConfig
+	EmailTemplatePath    string
+	RecipientEmail       string
+	TransactionsFile     string
+	AccountID            string
+	PipelineTimeoutSecs  int
+	CheckpointInterval   int // CHECKPOINT_INTERVAL rows between mid-file DB flushes
+	HeartbeatTimeoutSecs int // HEARTBEAT_TIMEOUT_SECS before a stale lock is reclaimed
+	MaxRowErrors         int // MAX_ROW_ERRORS threshold before marking file as to_review
 }
 
 func Load() (AppConfig, error) {
 	dbPort, err := strconv.Atoi(getEnv("DB_PORT", "5432"))
 	if err != nil {
 		return AppConfig{}, fmt.Errorf("config: invalid DB_PORT: %w", err)
-	}
-
-	smtpPort, err := strconv.Atoi(getEnv("SMTP_PORT", "587"))
-	if err != nil {
-		return AppConfig{}, fmt.Errorf("config: invalid SMTP_PORT: %w", err)
 	}
 
 	cfg := AppConfig{
@@ -60,11 +54,10 @@ func Load() (AppConfig, error) {
 			Password: getEnv("DB_PASSWORD", "stori"),
 			Name:     getEnv("DB_NAME", "storidb"),
 		},
-		SMTP: SMTPConfig{
-			Host:     getEnv("SMTP_HOST", "smtp.gmail.com"),
-			Port:     smtpPort,
-			User:     getEnv("SMTP_USER", "storinotifications@gmail.com"),
-			Password: os.Getenv("SMTP_PASSWORD"),
+		Brevo: BrevoConfig{
+			APIKey:      os.Getenv("BREVO_API_KEY"),
+			SenderEmail: getEnv("BREVO_SENDER_EMAIL", "storinotifications@gmail.com"),
+			SenderName:  getEnv("BREVO_SENDER_NAME", "noreply"),
 		},
 		RecipientEmail:    os.Getenv("RECIPIENT_EMAIL"),
 		TransactionsFile:  os.Getenv("TRANSACTIONS_FILE"),
@@ -98,8 +91,7 @@ func Load() (AppConfig, error) {
 // validate checks that all required fields are non-empty after loading.
 func (c AppConfig) validate() error {
 	required := map[string]string{
-		"SMTP_USER":         c.SMTP.User,
-		"SMTP_PASSWORD":     c.SMTP.Password,
+		"BREVO_API_KEY":     c.Brevo.APIKey,
 		"RECIPIENT_EMAIL":   c.RecipientEmail,
 		"TRANSACTIONS_FILE": c.TransactionsFile,
 		"ACCOUNT_ID":        c.AccountID,

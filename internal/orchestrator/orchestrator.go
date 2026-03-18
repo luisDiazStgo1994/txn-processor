@@ -125,6 +125,7 @@ func toSenderData(s aggregator.Summary) sender.SenderData {
 	return sender.SenderData{
 		TotalBalance: s.TotalBalance,
 		ByYear:       months,
+		InvalidRows:  s.InvalidRows,
 	}
 }
 

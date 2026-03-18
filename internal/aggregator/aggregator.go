@@ -48,6 +48,7 @@ type Summary struct {
 	AccountID    string
 	TotalBalance float64
 	ByYear       map[string]yearSummary // key: year string ("2026", ...)
+	InvalidRows  int                    // rows that failed parsing (below error threshold)
 }
 
 // RowError records a single parse/validation failure during processing.
@@ -161,6 +162,8 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 		_ = a.repo.UpdateFileProcessing(ctx, fp)
 		return summary, err
 	}
+
+	summary.InvalidRows = len(rowErrors)
 
 	fp.Status = storage.FileStatusDone
 	fp.CheckpointRow = summary.txnCount()
