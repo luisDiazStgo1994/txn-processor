@@ -19,26 +19,27 @@ type Account struct {
 type FileStatus string
 
 const (
-	FileStatusPending    FileStatus = "pending"
 	FileStatusProcessing FileStatus = "processing"
 	FileStatusDone       FileStatus = "done"
 	FileStatusFailed     FileStatus = "failed"
+	FileStatusToReview   FileStatus = "to_review" // error threshold exceeded; needs human intervention
 )
 
-// FileProcessing tracks the state of a single file ingestion run.
+// FileProcessingRow tracks the state of a single file ingestion run.
 // IdempotencyKey is derived from the file (e.g. SHA256 of path or S3 ETag).
-type FileProcessing struct {
+type FileProcessingRow struct {
 	IdempotencyKey string
 	AccountID      string
 	Status         FileStatus
 	CheckpointRow  int       // last successfully processed row (enables resumability)
 	HeartbeatAt    time.Time // updated periodically; lets other workers detect stale locks
+	RowErrorsJSON  []byte    // JSONB array of {row, error} objects; populated on to_review
 	UpdatedAt      time.Time
 }
 
-// FileSummary stores the aggregated result after a file has been fully processed.
+// FileSummaryRow stores the aggregated result after a file has been fully processed.
 // SummaryJSON is stored as JSONB in Postgres so the shape can evolve without migrations.
-type FileSummary struct {
+type FileSummaryRow struct {
 	IdempotencyKey string
 	AccountID      string
 	EmailSent      bool
@@ -58,12 +59,12 @@ type Repository interface {
 	GetAccount(ctx context.Context, accountID string) (Account, error)
 
 	// FileProcessing
-	CreateFileProcessing(ctx context.Context, fp FileProcessing) error
-	GetFileProcessing(ctx context.Context, idempotencyKey string) (FileProcessing, error)
-	UpdateFileProcessing(ctx context.Context, fp FileProcessing) error
+	CreateFileProcessing(ctx context.Context, fp FileProcessingRow) error
+	GetFileProcessing(ctx context.Context, idempotencyKey string) (FileProcessingRow, error)
+	UpdateFileProcessing(ctx context.Context, fp FileProcessingRow) error
 
 	// FileSummary
-	CreateFileSummary(ctx context.Context, fs FileSummary) error
-	GetFileSummary(ctx context.Context, idempotencyKey string) (FileSummary, error)
-	UpdateFileSummary(ctx context.Context, fs FileSummary) error
+	CreateFileSummary(ctx context.Context, fs FileSummaryRow) error
+	GetFileSummary(ctx context.Context, idempotencyKey string) (FileSummaryRow, error)
+	UpdateFileSummary(ctx context.Context, fs FileSummaryRow) error
 }
