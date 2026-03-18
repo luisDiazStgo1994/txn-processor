@@ -43,7 +43,7 @@ cd txn-processor
 
 ### 2. Create your `.env` file
 
-Copy the example below and fill in your values (MUST edit RECIPIENT_EMAIL and BREVO_API_KEY):
+Copy the example below and fill in your values (use .env.example as reference. MUST edit RECIPIENT_EMAIL and BREVO_API_KEY):
 
 ```bash
 # .env
@@ -62,7 +62,7 @@ BREVO_SENDER_NAME=Stori
 
 # App settings
 RECIPIENT_EMAIL=your-email@example.com
-TRANSACTIONS_FILE=/app/data/txns.csv
+TRANSACTIONS_FILE=/app/data/ACC-001_2025-01_2026-03_txns.csv
 ACCOUNT_ID=ACC-001
 
 # Optional tuning (shown with defaults)
