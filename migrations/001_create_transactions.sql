@@ -15,10 +15,11 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE TABLE IF NOT EXISTS file_processing (
     idempotency_key TEXT        PRIMARY KEY,
     account_id      TEXT        NOT NULL REFERENCES accounts(account_id),
-    status          TEXT        NOT NULL DEFAULT 'pending'
-                                CHECK (status IN ('pending','processing','done','failed')),
+    status          TEXT        NOT NULL DEFAULT 'processing'
+                                CHECK (status IN ('processing','done','failed','to_review')),
     checkpoint_row  INTEGER     NOT NULL DEFAULT 0,
     heartbeat_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    row_errors      JSONB       NOT NULL DEFAULT '[]',
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

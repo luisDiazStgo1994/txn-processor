@@ -11,29 +11,32 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"sort"
+	"strconv"
 	"time"
 
+	"github.com/luisDiazStgo1994/txn-processor/config"
 	"github.com/luisDiazStgo1994/txn-processor/internal/aggregator"
-	"github.com/luisDiazStgo1994/txn-processor/internal/email"
 	"github.com/luisDiazStgo1994/txn-processor/internal/parser"
+	"github.com/luisDiazStgo1994/txn-processor/internal/sender"
 	"github.com/luisDiazStgo1994/txn-processor/internal/storage"
 )
 
 // Orchestrator wires the sender and repository together and drives the pipeline.
 type Orchestrator struct {
-	sender             email.Sender
-	repo               storage.Repository
-	checkpointInterval int
+	sender sender.Sender
+	repo   storage.Repository
+	config config.AppConfig
 }
 
 // New creates a ready-to-use Orchestrator.
-func New(repo storage.Repository, sender email.Sender, checkpointInterval int) *Orchestrator {
-	return &Orchestrator{repo: repo, sender: sender, checkpointInterval: checkpointInterval}
+func New(repo storage.Repository, sender sender.Sender, config config.AppConfig) *Orchestrator {
+	return &Orchestrator{repo: repo, sender: sender, config: config}
 }
 
 // Run executes the full pipeline for a single file:
-//  1. Upsert the account (ensure it exists before any processing)
+//  1. Get the account and validate its email
 //  2. Derive a stable idempotency key from filePath
 //  3. Build a CsvParser from src and run the aggregator
 //  4. Persist the summary
@@ -41,17 +44,19 @@ func New(repo storage.Repository, sender email.Sender, checkpointInterval int) *
 //
 // src is an io.Reader so callers can pass a local file, an S3 stream, or any
 // other source — the orchestrator stays agnostic to the origin.
-func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, filePath, accountID, recipientEmail string) error {
-	if err := o.repo.UpsertAccount(ctx, storage.Account{
-		AccountID: accountID,
-		Email:     recipientEmail,
-	}); err != nil {
-		return fmt.Errorf("orchestrator: upsert account: %w", err)
+func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, accountID, filePath string) error {
+	account, err := o.repo.GetAccount(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("orchestrator: get account: %w", err)
 	}
 
-	fileKey := idempotencyKey(filePath)
+	if _, err := mail.ParseAddress(account.Email); err != nil {
+		return fmt.Errorf("orchestrator: invalid email for account %q: %w", accountID, err)
+	}
 
-	agg := aggregator.New(p, o.repo, accountID, fileKey, o.checkpointInterval)
+	fileKey := idempotencyKey(filePath, accountID)
+
+	agg := aggregator.New(p, o.repo, accountID, fileKey, o.config.CheckpointInterval, o.config.HeartbeatTimeoutSecs, o.config.MaxRowErrors)
 
 	summary, err := agg.Compute(ctx)
 	if err != nil {
@@ -63,7 +68,7 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, filePath, accou
 		return fmt.Errorf("orchestrator: marshal summary: %w", err)
 	}
 
-	if err := o.persistSummary(ctx, fileKey, accountID, summaryJSON); err != nil {
+	if err := agg.PersistSummary(ctx, fileKey, accountID, summaryJSON); err != nil {
 		return err
 	}
 
@@ -75,7 +80,7 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, filePath, accou
 		return nil // idempotent — email already delivered on a previous run
 	}
 
-	if err := o.sender.Send(ctx, toEmailData(summary, recipientEmail)); err != nil {
+	if err := o.sender.Send(ctx, account.Email, toSenderData(summary)); err != nil {
 		return fmt.Errorf("orchestrator: send email: %w", err)
 	}
 
@@ -88,55 +93,38 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, filePath, accou
 	return nil
 }
 
-// persistSummary upserts the FileSummary row (create on first run, update on retry).
-func (o *Orchestrator) persistSummary(ctx context.Context, fileKey, accountID string, summaryJSON []byte) error {
-	existing, err := o.repo.GetFileSummary(ctx, fileKey)
-	if err != nil {
-		// First run — create.
-		return o.repo.CreateFileSummary(ctx, storage.FileSummary{
-			IdempotencyKey: fileKey,
-			AccountID:      accountID,
-			EmailSent:      false,
-			SummaryJSON:    summaryJSON,
-			CreatedAt:      time.Now().UTC(),
-			UpdatedAt:      time.Now().UTC(),
-		})
-	}
-	if existing.EmailSent {
-		return nil // nothing to update; pipeline already completed
-	}
-	existing.SummaryJSON = summaryJSON
-	existing.UpdatedAt = time.Now().UTC()
-	return o.repo.UpdateFileSummary(ctx, existing)
-}
-
 // idempotencyKey returns a short, stable key derived from a file path.
 // For S3-triggered flows, use the object ETag instead.
-func idempotencyKey(path string) string {
-	h := sha256.Sum256([]byte(path))
+func idempotencyKey(path, accountId string) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s_%s", accountId, path)))
 	return fmt.Sprintf("%x", h[:8])
 }
 
-// toEmailData translates an aggregator.Summary into the email package's DTO.
-// Months are sorted alphabetically for consistent email rendering.
-func toEmailData(s aggregator.Summary, recipientEmail string) email.EmailData {
-	months := make([]email.MonthData, 0, len(s.ByMonth))
-	for _, ms := range s.ByMonth {
-		months = append(months, email.MonthData{
-			MonthNum:  ms.MonthNum,
-			Month:     ms.Month,
-			TxnCount:  ms.TxnCount,
-			AvgCredit: ms.AvgCredit,
-			AvgDebit:  ms.AvgDebit,
-		})
+// toSenderData translates an aggregator.Summary into the email package's DTO.
+// Flattens ByYear→ByMonth into a flat slice sorted chronologically (year then month).
+func toSenderData(s aggregator.Summary) sender.SenderData {
+	var months []sender.MonthDataDTO
+	for yearKey, ys := range s.ByYear {
+		year, _ := strconv.Atoi(yearKey)
+		for _, ms := range ys.ByMonth {
+			months = append(months, sender.MonthDataDTO{
+				Year:      year,
+				MonthNum:  ms.MonthNum,
+				Month:     ms.Month,
+				TxnCount:  ms.TxnCount,
+				AvgCredit: ms.AvgCredit,
+				AvgDebit:  ms.AvgDebit,
+			})
+		}
 	}
 	sort.Slice(months, func(i, j int) bool {
-		return months[i].MonthNum < months[j].MonthNum
+		ki := months[i].Year*12 + months[i].MonthNum
+		kj := months[j].Year*12 + months[j].MonthNum
+		return ki < kj
 	})
-	return email.EmailData{
-		AccountID:    s.AccountID,
-		RecipientTo:  recipientEmail,
+	return sender.SenderData{
 		TotalBalance: s.TotalBalance,
-		ByMonth:      months,
+		ByYear:       months,
 	}
 }
+

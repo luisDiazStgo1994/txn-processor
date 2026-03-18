@@ -10,16 +10,16 @@ import (
 // It satisfies the Repository interface without requiring a real database.
 type MockRepository struct {
 	accounts       map[string]Account
-	fileProcessing map[string]FileProcessing
-	fileSummaries  map[string]FileSummary
+	fileProcessing map[string]FileProcessingRow
+	fileSummaries  map[string]FileSummaryRow
 }
 
 // NewMockRepository returns an initialized MockRepository.
 func NewMockRepository() *MockRepository {
 	return &MockRepository{
 		accounts:       make(map[string]Account),
-		fileProcessing: make(map[string]FileProcessing),
-		fileSummaries:  make(map[string]FileSummary),
+		fileProcessing: make(map[string]FileProcessingRow),
+		fileSummaries:  make(map[string]FileSummaryRow),
 	}
 }
 
@@ -40,7 +40,7 @@ func (m *MockRepository) GetAccount(_ context.Context, accountID string) (Accoun
 
 // --- FileProcessing ---
 
-func (m *MockRepository) CreateFileProcessing(_ context.Context, fp FileProcessing) error {
+func (m *MockRepository) CreateFileProcessing(_ context.Context, fp FileProcessingRow) error {
 	if _, exists := m.fileProcessing[fp.IdempotencyKey]; exists {
 		return fmt.Errorf("storage: file processing %q already exists", fp.IdempotencyKey)
 	}
@@ -48,15 +48,15 @@ func (m *MockRepository) CreateFileProcessing(_ context.Context, fp FileProcessi
 	return nil
 }
 
-func (m *MockRepository) GetFileProcessing(_ context.Context, idempotencyKey string) (FileProcessing, error) {
+func (m *MockRepository) GetFileProcessing(_ context.Context, idempotencyKey string) (FileProcessingRow, error) {
 	fp, ok := m.fileProcessing[idempotencyKey]
 	if !ok {
-		return FileProcessing{}, fmt.Errorf("storage: file processing %q not found: %w", idempotencyKey, sql.ErrNoRows)
+		return FileProcessingRow{}, fmt.Errorf("storage: file processing %q not found: %w", idempotencyKey, sql.ErrNoRows)
 	}
 	return fp, nil
 }
 
-func (m *MockRepository) UpdateFileProcessing(_ context.Context, fp FileProcessing) error {
+func (m *MockRepository) UpdateFileProcessing(_ context.Context, fp FileProcessingRow) error {
 	if _, ok := m.fileProcessing[fp.IdempotencyKey]; !ok {
 		return fmt.Errorf("storage: file processing %q not found", fp.IdempotencyKey)
 	}
@@ -66,7 +66,7 @@ func (m *MockRepository) UpdateFileProcessing(_ context.Context, fp FileProcessi
 
 // --- FileSummary ---
 
-func (m *MockRepository) CreateFileSummary(_ context.Context, fs FileSummary) error {
+func (m *MockRepository) CreateFileSummary(_ context.Context, fs FileSummaryRow) error {
 	if _, exists := m.fileSummaries[fs.IdempotencyKey]; exists {
 		return fmt.Errorf("storage: file summary %q already exists", fs.IdempotencyKey)
 	}
@@ -74,15 +74,15 @@ func (m *MockRepository) CreateFileSummary(_ context.Context, fs FileSummary) er
 	return nil
 }
 
-func (m *MockRepository) GetFileSummary(_ context.Context, idempotencyKey string) (FileSummary, error) {
+func (m *MockRepository) GetFileSummary(_ context.Context, idempotencyKey string) (FileSummaryRow, error) {
 	fs, ok := m.fileSummaries[idempotencyKey]
 	if !ok {
-		return FileSummary{}, fmt.Errorf("storage: file summary %q not found: %w", idempotencyKey, sql.ErrNoRows)
+		return FileSummaryRow{}, fmt.Errorf("storage: file summary %q not found: %w", idempotencyKey, sql.ErrNoRows)
 	}
 	return fs, nil
 }
 
-func (m *MockRepository) UpdateFileSummary(_ context.Context, fs FileSummary) error {
+func (m *MockRepository) UpdateFileSummary(_ context.Context, fs FileSummaryRow) error {
 	if _, ok := m.fileSummaries[fs.IdempotencyKey]; !ok {
 		return fmt.Errorf("storage: file summary %q not found", fs.IdempotencyKey)
 	}

@@ -20,7 +20,7 @@ func csvWith(rows string) string {
 func newAgg(csv, fileKey string) (*aggregator.Aggregator, *storage.MockRepository) {
 	repo := storage.NewMockRepository()
 	p := parser.NewCsvParser(strings.NewReader(csv))
-	agg := aggregator.New(p, repo, "ACC-001", fileKey, 100)
+	agg := aggregator.New(p, repo, "ACC-001", fileKey, 100, 20, 10)
 	return agg, repo
 }
 
@@ -29,7 +29,7 @@ func approxEqual(a, b float64) bool {
 }
 
 func TestCompute_TotalBalance(t *testing.T) {
-	csv := csvWith("0,7/15,+60.5\n1,7/28,-10.3\n2,8/2,-20.46\n")
+	csv := csvWith("0,15/07/2026,+60.5\n1,28/07/2026,-10.3\n2,02/08/2026,-20.46\n")
 	agg, _ := newAgg(csv, "key1")
 
 	summary, err := agg.Compute(context.Background())
@@ -44,7 +44,7 @@ func TestCompute_TotalBalance(t *testing.T) {
 }
 
 func TestCompute_ByMonthAggregates(t *testing.T) {
-	csv := csvWith("0,7/15,+60.5\n1,7/28,-10.3\n2,8/2,-20.46\n")
+	csv := csvWith("0,15/07/2026,+60.5\n1,28/07/2026,-10.3\n2,02/08/2026,-20.46\n")
 	agg, _ := newAgg(csv, "key2")
 
 	summary, err := agg.Compute(context.Background())
@@ -52,9 +52,14 @@ func TestCompute_ByMonthAggregates(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	july, ok := summary.ByMonth["July"]
+	ys2026, ok := summary.ByYear["2026"]
 	if !ok {
-		t.Fatal("missing July in ByMonth")
+		t.Fatal("missing 2026 in ByYear")
+	}
+
+	july, ok := ys2026.ByMonth["July"]
+	if !ok {
+		t.Fatal("missing July in ByYear[2026].ByMonth")
 	}
 	if july.TxnCount != 2 {
 		t.Errorf("July TxnCount = %d, want 2", july.TxnCount)
@@ -69,9 +74,9 @@ func TestCompute_ByMonthAggregates(t *testing.T) {
 		t.Errorf("July MonthNum = %d, want 7", july.MonthNum)
 	}
 
-	aug, ok := summary.ByMonth["August"]
+	aug, ok := ys2026.ByMonth["August"]
 	if !ok {
-		t.Fatal("missing August in ByMonth")
+		t.Fatal("missing August in ByYear[2026].ByMonth")
 	}
 	if aug.TxnCount != 1 {
 		t.Errorf("August TxnCount = %d, want 1", aug.TxnCount)
@@ -83,7 +88,7 @@ func TestCompute_ByMonthAggregates(t *testing.T) {
 
 func TestCompute_MalformedRowSkipped(t *testing.T) {
 	// row 1 has a bad date — should be skipped without aborting the run
-	csv := csvWith("0,7/15,+60.5\n1,baddate,-10.3\n2,8/2,-20.46\n")
+	csv := csvWith("0,15/07/2026,+60.5\n1,baddate,-10.3\n2,02/08/2026,-20.46\n")
 	agg, _ := newAgg(csv, "key3")
 
 	summary, err := agg.Compute(context.Background())
@@ -95,13 +100,14 @@ func TestCompute_MalformedRowSkipped(t *testing.T) {
 	if !approxEqual(summary.TotalBalance, want) {
 		t.Errorf("TotalBalance = %v, want %v", summary.TotalBalance, want)
 	}
-	if len(summary.ByMonth) != 2 {
-		t.Errorf("ByMonth len = %d, want 2", len(summary.ByMonth))
+	ys := summary.ByYear["2026"]
+	if len(ys.ByMonth) != 2 {
+		t.Errorf("ByYear[2026].ByMonth len = %d, want 2", len(ys.ByMonth))
 	}
 }
 
 func TestCompute_FileProcessingStatusDone(t *testing.T) {
-	csv := csvWith("0,7/15,+60.5\n")
+	csv := csvWith("0,15/07/2026,+60.5\n")
 	agg, repo := newAgg(csv, "key4")
 
 	if _, err := agg.Compute(context.Background()); err != nil {
@@ -121,7 +127,7 @@ func TestCompute_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already done before Compute is called
 
-	csv := csvWith("0,7/15,+60.5\n1,7/28,-10.3\n")
+	csv := csvWith("0,15/07/2026,+60.5\n1,28/07/2026,-10.3\n")
 	agg, repo := newAgg(csv, "key5")
 
 	_, err := agg.Compute(ctx)
@@ -137,10 +143,10 @@ func TestCompute_ContextCancelled(t *testing.T) {
 
 func TestCompute_CheckpointFlushedMidFile(t *testing.T) {
 	// checkpointInterval=2, 4 rows → checkpoint should be flushed after row 2
-	csv := csvWith("0,7/15,+10\n1,7/16,+20\n2,7/17,+30\n3,7/18,+40\n")
+	csv := csvWith("0,15/07/2026,+10\n1,16/07/2026,+20\n2,17/07/2026,+30\n3,18/07/2026,+40\n")
 	repo := storage.NewMockRepository()
 	p := parser.NewCsvParser(strings.NewReader(csv))
-	agg := aggregator.New(p, repo, "ACC-001", "key6", 2)
+	agg := aggregator.New(p, repo, "ACC-001", "key6", 2, 20, 10)
 
 	if _, err := agg.Compute(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)

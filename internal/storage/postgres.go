@@ -61,13 +61,17 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, accountID string) (
 
 // --- FileProcessing ---
 
-func (r *PostgresRepository) CreateFileProcessing(ctx context.Context, fp FileProcessing) error {
+func (r *PostgresRepository) CreateFileProcessing(ctx context.Context, fp FileProcessingRow) error {
+	rowErrors := fp.RowErrorsJSON
+	if rowErrors == nil {
+		rowErrors = []byte("[]")
+	}
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO file_processing
-		   (idempotency_key, account_id, status, checkpoint_row, heartbeat_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		   (idempotency_key, account_id, status, checkpoint_row, heartbeat_at, row_errors, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		fp.IdempotencyKey, fp.AccountID, fp.Status,
-		fp.CheckpointRow, fp.HeartbeatAt, time.Now().UTC(),
+		fp.CheckpointRow, fp.HeartbeatAt, rowErrors, time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("storage: create file processing: %w", err)
@@ -75,26 +79,30 @@ func (r *PostgresRepository) CreateFileProcessing(ctx context.Context, fp FilePr
 	return nil
 }
 
-func (r *PostgresRepository) GetFileProcessing(ctx context.Context, idempotencyKey string) (FileProcessing, error) {
-	var fp FileProcessing
+func (r *PostgresRepository) GetFileProcessing(ctx context.Context, idempotencyKey string) (FileProcessingRow, error) {
+	var fp FileProcessingRow
 	err := r.db.QueryRowContext(ctx,
-		`SELECT idempotency_key, account_id, status, checkpoint_row, heartbeat_at, updated_at
+		`SELECT idempotency_key, account_id, status, checkpoint_row, heartbeat_at, row_errors, updated_at
 		 FROM file_processing WHERE idempotency_key = $1`,
 		idempotencyKey,
 	).Scan(&fp.IdempotencyKey, &fp.AccountID, &fp.Status,
-		&fp.CheckpointRow, &fp.HeartbeatAt, &fp.UpdatedAt)
+		&fp.CheckpointRow, &fp.HeartbeatAt, &fp.RowErrorsJSON, &fp.UpdatedAt)
 	if err != nil {
-		return FileProcessing{}, fmt.Errorf("storage: get file processing %q: %w", idempotencyKey, err)
+		return FileProcessingRow{}, fmt.Errorf("storage: get file processing %q: %w", idempotencyKey, err)
 	}
 	return fp, nil
 }
 
-func (r *PostgresRepository) UpdateFileProcessing(ctx context.Context, fp FileProcessing) error {
+func (r *PostgresRepository) UpdateFileProcessing(ctx context.Context, fp FileProcessingRow) error {
+	rowErrors := fp.RowErrorsJSON
+	if rowErrors == nil {
+		rowErrors = []byte("[]")
+	}
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE file_processing
-		 SET status = $1, checkpoint_row = $2, heartbeat_at = $3, updated_at = $4
-		 WHERE idempotency_key = $5`,
-		fp.Status, fp.CheckpointRow, fp.HeartbeatAt, time.Now().UTC(), fp.IdempotencyKey,
+		 SET status = $1, checkpoint_row = $2, heartbeat_at = $3, row_errors = $4, updated_at = $5
+		 WHERE idempotency_key = $6`,
+		fp.Status, fp.CheckpointRow, fp.HeartbeatAt, rowErrors, time.Now().UTC(), fp.IdempotencyKey,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: update file processing %q: %w", fp.IdempotencyKey, err)
@@ -104,7 +112,7 @@ func (r *PostgresRepository) UpdateFileProcessing(ctx context.Context, fp FilePr
 
 // --- FileSummary ---
 
-func (r *PostgresRepository) CreateFileSummary(ctx context.Context, fs FileSummary) error {
+func (r *PostgresRepository) CreateFileSummary(ctx context.Context, fs FileSummaryRow) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO file_summary
@@ -118,8 +126,8 @@ func (r *PostgresRepository) CreateFileSummary(ctx context.Context, fs FileSumma
 	return nil
 }
 
-func (r *PostgresRepository) GetFileSummary(ctx context.Context, idempotencyKey string) (FileSummary, error) {
-	var fs FileSummary
+func (r *PostgresRepository) GetFileSummary(ctx context.Context, idempotencyKey string) (FileSummaryRow, error) {
+	var fs FileSummaryRow
 	err := r.db.QueryRowContext(ctx,
 		`SELECT idempotency_key, account_id, email_sent, summary, created_at, updated_at
 		 FROM file_summary WHERE idempotency_key = $1`,
@@ -127,12 +135,12 @@ func (r *PostgresRepository) GetFileSummary(ctx context.Context, idempotencyKey 
 	).Scan(&fs.IdempotencyKey, &fs.AccountID, &fs.EmailSent,
 		&fs.SummaryJSON, &fs.CreatedAt, &fs.UpdatedAt)
 	if err != nil {
-		return FileSummary{}, fmt.Errorf("storage: get file summary %q: %w", idempotencyKey, err)
+		return FileSummaryRow{}, fmt.Errorf("storage: get file summary %q: %w", idempotencyKey, err)
 	}
 	return fs, nil
 }
 
-func (r *PostgresRepository) UpdateFileSummary(ctx context.Context, fs FileSummary) error {
+func (r *PostgresRepository) UpdateFileSummary(ctx context.Context, fs FileSummaryRow) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE file_summary
 		 SET email_sent = $1, summary = $2, updated_at = $3

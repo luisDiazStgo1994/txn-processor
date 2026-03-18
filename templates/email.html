@@ -27,7 +27,6 @@
       <h1>Transaction Summary</h1>
     </div>
     <div class="body">
-      <p style="font-size:13px;color:#888;margin:0 0 24px;">Account: <strong>{{.AccountID}}</strong></p>
       <div class="balance">
         <div class="label">Total Balance</div>
         <div class="amount">${{printf "%.2f" .TotalBalance}}</div>
@@ -43,7 +42,7 @@
           </tr>
         </thead>
         <tbody>
-          {{range .ByMonth}}
+          {{range .ByYear}}
           <tr>
             <td>{{.Month}}</td>
             <td>{{.TxnCount}}</td>

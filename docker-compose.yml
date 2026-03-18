@@ -26,8 +26,10 @@ services:
     env_file:
       - .env
     environment:
+      # Override .env values that differ inside the container
       DB_HOST: postgres
       TRANSACTIONS_FILE: /app/data/txns.csv
+      ACCOUNT_ID: ACC-001
 
 volumes:
   pgdata:
