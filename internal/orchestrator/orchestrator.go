@@ -56,6 +56,22 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, accountID, file
 
 	fileKey := idempotencyKey(filePath, accountID)
 
+	// If the file was already fully processed, skip aggregation and jump
+	// straight to the email check. This handles the case where a previous
+	// run completed aggregation but failed to send the email.
+	fs, err := o.repo.GetFileSummary(ctx, fileKey)
+	if err == nil && fs.EmailSent {
+		return nil // idempotent — email already delivered on a previous run
+	}
+	if err == nil && fs.SummaryJSON != nil {
+		// Summary exists but email not sent — check if file is done.
+		fp, fpErr := o.repo.GetFileProcessing(ctx, fileKey)
+		if fpErr == nil && fp.Status == storage.FileStatusDone {
+			// Skip aggregation, go straight to email.
+			return o.sendAndMark(ctx, fs, account.Email)
+		}
+	}
+
 	agg := aggregator.New(p, o.repo, accountID, fileKey, o.config.CheckpointInterval, o.config.HeartbeatTimeoutSecs, o.config.MaxRowErrors)
 
 	summary, err := agg.Compute(ctx)
@@ -72,15 +88,23 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, accountID, file
 		return err
 	}
 
-	fs, err := o.repo.GetFileSummary(ctx, fileKey)
+	fs, err = o.repo.GetFileSummary(ctx, fileKey)
 	if err != nil {
 		return fmt.Errorf("orchestrator: get file summary: %w", err)
 	}
-	if fs.EmailSent {
-		return nil // idempotent — email already delivered on a previous run
+
+	return o.sendAndMark(ctx, fs, account.Email)
+}
+
+// sendAndMark sends the summary email and marks email_sent = true.
+// It unmarshals the stored SummaryJSON to build the email payload.
+func (o *Orchestrator) sendAndMark(ctx context.Context, fs storage.FileSummaryRow, email string) error {
+	var summary aggregator.Summary
+	if err := json.Unmarshal(fs.SummaryJSON, &summary); err != nil {
+		return fmt.Errorf("orchestrator: unmarshal summary for email: %w", err)
 	}
 
-	if err := o.sender.Send(ctx, account.Email, toSenderData(summary)); err != nil {
+	if err := o.sender.Send(ctx, email, toSenderData(summary)); err != nil {
 		return fmt.Errorf("orchestrator: send email: %w", err)
 	}
 
@@ -97,7 +121,7 @@ func (o *Orchestrator) Run(ctx context.Context, p parser.Parser, accountID, file
 // For S3-triggered flows, use the object ETag instead.
 func idempotencyKey(path, accountId string) string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%s_%s", accountId, path)))
-	return fmt.Sprintf("%x", h[:8])
+	return fmt.Sprintf("%x", h[:16])
 }
 
 // toSenderData translates an aggregator.Summary into the email package's DTO.
@@ -128,4 +152,3 @@ func toSenderData(s aggregator.Summary) sender.SenderData {
 		InvalidRows:  s.InvalidRows,
 	}
 }
-
