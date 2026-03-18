@@ -31,11 +31,14 @@ type SMTPConfig struct {
 type AppConfig struct {
 	DB                  DBConfig
 	SMTP                SMTPConfig
+	EmailTemplatePath   string
 	RecipientEmail      string
 	TransactionsFile    string
 	AccountID           string
-	PipelineTimeoutSecs int
-	CheckpointInterval  int // CHECKPOINT_INTERVAL rows between mid-file DB flushes
+	PipelineTimeoutSecs    int
+	CheckpointInterval     int // CHECKPOINT_INTERVAL rows between mid-file DB flushes
+	HeartbeatTimeoutSecs   int // HEARTBEAT_TIMEOUT_SECS before a stale lock is reclaimed
+	MaxRowErrors           int // MAX_ROW_ERRORS threshold before marking file as to_review
 }
 
 func Load() (AppConfig, error) {
@@ -60,18 +63,27 @@ func Load() (AppConfig, error) {
 		SMTP: SMTPConfig{
 			Host:     getEnv("SMTP_HOST", "smtp.gmail.com"),
 			Port:     smtpPort,
-			User:     os.Getenv("SMTP_USER"),
+			User:     getEnv("SMTP_USER", "storinotifications@gmail.com"),
 			Password: os.Getenv("SMTP_PASSWORD"),
 		},
-		RecipientEmail:   os.Getenv("RECIPIENT_EMAIL"),
-		TransactionsFile: getEnv("TRANSACTIONS_FILE", "/data/txns.csv"),
-		AccountID:           getEnv("ACCOUNT_ID", "ACC-001"),
+		RecipientEmail:    os.Getenv("RECIPIENT_EMAIL"),
+		TransactionsFile:  os.Getenv("TRANSACTIONS_FILE"),
+		AccountID:         os.Getenv("ACCOUNT_ID"),
+		EmailTemplatePath: getEnv("EMAIL_TEMPLATE_PATH", "templates/email.html"),
 		PipelineTimeoutSecs: func() int {
 			v, _ := strconv.Atoi(getEnv("PIPELINE_TIMEOUT_SECS", "120"))
 			return v
 		}(),
 		CheckpointInterval: func() int {
 			v, _ := strconv.Atoi(getEnv("CHECKPOINT_INTERVAL", "100"))
+			return v
+		}(),
+		HeartbeatTimeoutSecs: func() int {
+			v, _ := strconv.Atoi(getEnv("HEARTBEAT_TIMEOUT_SECS", "20"))
+			return v
+		}(),
+		MaxRowErrors: func() int {
+			v, _ := strconv.Atoi(getEnv("MAX_ROW_ERRORS", "10"))
 			return v
 		}(),
 	}
@@ -86,9 +98,11 @@ func Load() (AppConfig, error) {
 // validate checks that all required fields are non-empty after loading.
 func (c AppConfig) validate() error {
 	required := map[string]string{
-		"SMTP_USER":       c.SMTP.User,
-		"SMTP_PASSWORD":   c.SMTP.Password,
-		"RECIPIENT_EMAIL": c.RecipientEmail,
+		"SMTP_USER":         c.SMTP.User,
+		"SMTP_PASSWORD":     c.SMTP.Password,
+		"RECIPIENT_EMAIL":   c.RecipientEmail,
+		"TRANSACTIONS_FILE": c.TransactionsFile,
+		"ACCOUNT_ID":        c.AccountID,
 	}
 	for key, val := range required {
 		if val == "" {
