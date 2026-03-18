@@ -76,7 +76,7 @@ ACCOUNT_ID=ACC-001
 
 ### 3. Place your CSV file
 
-The sample file is at `data/txns.csv`. Replace it with your own if needed. Expected format:
+The `data/` directory is **not** copied into the Docker image — it is mounted as a volume at runtime (`./data:/app/data`). Place your CSV file in the local `data/` directory and the container will read it directly from there. Expected format:
 
 ```csv
 Id,Date,Transaction

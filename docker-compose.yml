@@ -25,6 +25,8 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    volumes:
+      - ./data:/app/data
     environment:
       # Override .env values that differ inside the container
       DB_HOST: postgres
