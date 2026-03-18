@@ -16,6 +16,7 @@ WORKDIR /app
 
 COPY --from=builder /app/txn-processor .
 COPY --from=builder /app/templates ./templates
-COPY --from=builder /app/data ./data
+
+VOLUME /app/data
 
 ENTRYPOINT ["./txn-processor"]
