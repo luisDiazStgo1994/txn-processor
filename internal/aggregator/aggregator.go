@@ -159,7 +159,9 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 		} else {
 			fp.Status = storage.FileStatusFailed
 		}
-		_ = a.repo.UpdateFileProcessing(ctx, fp)
+		if updateErr := a.repo.UpdateFileProcessing(ctx, fp); updateErr != nil {
+			slog.Error("failed to persist file status", "fileKey", a.fileKey, "status", fp.Status, "error", updateErr)
+		}
 		return summary, err
 	}
 
@@ -167,6 +169,11 @@ func (a *Aggregator) Compute(ctx context.Context) (Summary, error) {
 
 	fp.Status = storage.FileStatusDone
 	fp.CheckpointRow = summary.txnCount()
+	if len(rowErrors) > 0 {
+		if errJSON, marshalErr := json.Marshal(rowErrors); marshalErr == nil {
+			fp.RowErrorsJSON = errJSON
+		}
+	}
 	if err := a.repo.UpdateFileProcessing(ctx, fp); err != nil {
 		return summary, fmt.Errorf("aggregator: update file processing to done: %w", err)
 	}
