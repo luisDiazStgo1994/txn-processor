@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/luisDiazStgo1994/txn-processor/config"
-	"github.com/luisDiazStgo1994/txn-processor/internal/email"
 	"github.com/luisDiazStgo1994/txn-processor/internal/orchestrator"
 	"github.com/luisDiazStgo1994/txn-processor/internal/parser"
+	"github.com/luisDiazStgo1994/txn-processor/internal/sender"
 	"github.com/luisDiazStgo1994/txn-processor/internal/storage"
 )
 
@@ -47,7 +47,7 @@ func run() error {
 		}
 	}()
 
-	sender, err := email.NewEmailSender(cfg.SMTP, "templates/email.html")
+	sender, err := sender.NewEmailSender(cfg.SMTP, cfg.EmailTemplatePath)
 	if err != nil {
 		return fmt.Errorf("email: %w", err)
 	}
@@ -58,10 +58,17 @@ func run() error {
 	}
 	defer f.Close()
 
+	if err := repo.UpsertAccount(ctx, storage.Account{
+		AccountID: cfg.AccountID,
+		Email:     cfg.RecipientEmail,
+	}); err != nil {
+		return fmt.Errorf("init: upsert account: %w", err)
+	}
+
 	p := parser.NewCsvParser(f)
 
-	orch := orchestrator.New(repo, sender, cfg.CheckpointInterval)
-	if err := orch.Run(ctx, p, cfg.TransactionsFile, cfg.AccountID, cfg.RecipientEmail); err != nil {
+	orch := orchestrator.New(repo, sender, cfg)
+	if err := orch.Run(ctx, p, cfg.AccountID, cfg.TransactionsFile); err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 
